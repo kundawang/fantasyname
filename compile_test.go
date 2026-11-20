@@ -24,10 +24,33 @@ func TestCompileErrors(t *testing.T) {
 		{Pattern: "<a)", Err: ErrUnbalancedGroup},
 		{Pattern: "(a>", Err: ErrUnbalancedGroup},
 		{Pattern: "a|b", Err: ErrInvalidSplit},
+		// extended syntax
+		{Pattern: "{a", Err: ErrUnbalancedGroup},
+		{Pattern: "a}", Err: ErrEmptyStack},
+		{Pattern: "[hero:a", Err: ErrUnbalancedGroup},
+		{Pattern: "a]", Err: ErrEmptyStack},
+		{Pattern: "<[hero:a>", Err: ErrUnbalancedGroup},
+		{Pattern: "[hero:<a]", Err: ErrUnbalancedGroup},
+		{Pattern: "{0:a}", Err: ErrBadWeight},
+		{Pattern: "{-2:a}", Err: ErrBadWeight},
+		{Pattern: "{a|0:b}", Err: ErrBadWeight},
+		{Pattern: "{99999999999999999999:a}", Err: ErrBadWeight},
+		{Pattern: "[:a]", Err: ErrMissingLabel},
+		{Pattern: "[hero]", Err: ErrBadLabel},
+		{Pattern: "[9:x]", Err: ErrBadLabel},
+		{Pattern: "[a b:x]", Err: ErrBadLabel},
+		{Pattern: "[bogus:x]", Err: ErrUnknownLabel},
+		{Pattern: `\`, Err: ErrBadEscape},
+		{Pattern: `\q`, Err: ErrBadEscape},
+		{Pattern: "$nope", Err: ErrUnknownFragment},
 	}
 
 	for idx, tc := range cases {
-		_, err := Compile(tc.Pattern)
+		_, err := Compile(tc.Pattern,
+			Labels("hero"),
+			StrictLabels(true),
+			Fragments(map[string]string{"a": "v"}),
+		)
 		if err == nil {
 			t.Errorf("no error for case: %d", idx)
 		}
@@ -102,9 +125,9 @@ func TestCompileDictionary(t *testing.T) {
 	)
 
 	custom := map[rune][]string{
-		'a': {"aaa"},
-		'b': {"bbb"},
-		'c': {"ccc"},
+		'a': {bigSyllableA},
+		'b': {bigSyllableB},
+		'c': {bigSyllableC},
 	}
 
 	gen, err := Compile(pat, Dictionary(custom))

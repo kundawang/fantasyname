@@ -78,3 +78,91 @@ or nothing at all.
 
 An exclamation point `!` means to capitalize the component that follows it. For example,
 `!(foo)` will emit `Foo` and `v!s` will emit a lowercase vowel followed by a capitalized syllable, like `eRod`.
+
+# weights, conditions and fragments
+
+The pattern language can be extended with three constructs. A pattern that only
+uses the classic syntax above compiles exactly as before; the new characters are
+recognized only where a construct actually starts.
+
+## weighted branches
+
+Curly braces `{` `}` group alternatives together with an optional positive
+integer weight before each `weight:` branch. Branches without a weight count as
+`1`. The generator picks one branch with probability proportional to its weight.
+Weights are local to their group, groups may be nested, and the usual groups,
+conditionals and dictionary symbols can be used inside a branch.
+
+```
+{3:(Al)|1:(El)}          # "Al" three times as often as "El"
+{9:(Smith|Jones)|1:(Dragonslayer)}   # a rare heroic surname
+{2:<s|cvc>|1:(x)}        # nested classic alternatives
+```
+
+A weight of zero, a negative weight, or a weight placed anywhere other than the
+start of a weighted branch is reported as `ErrBadWeight`. Empty branches still
+count as one alternative with weight `1`.
+
+## conditional fragments
+
+Square brackets `[` `]` enclose text that is expanded only when a label is
+enabled. The construct is `[label:pattern]`, or `[!label:pattern]` for the
+inverse (expanded only when the label is *not* enabled). Labels are passed to
+[Compile] with the `Labels` option; a conditional whose label is not enabled
+expands to nothing. Unlike `(a|b)`, the parts of a conditional are always
+emitted in order - a conditional never chooses between alternatives, but it may
+contain groups that do. Conditional blocks may be nested and combined with
+weighted groups, dictionary symbols and fragments.
+
+```go
+gen, _ := fn.Compile("(Sir )[hero:!s](of )[hero:(the )]",
+    fn.Labels("hero"), fn.RandFn(rand.Intn))
+
+gen, _ = fn.Compile("[!hero:(the lowborn )](x)", fn.RandFn(rand.Intn))
+```
+
+By default an unknown label simply disables its block. Pass `StrictLabels(true)`
+to make `[unknown:...]` a compile-time `ErrUnknownLabel` instead.
+
+## named fragments
+
+A `$name` reference inlines a pattern registered with the `Fragments` option.
+Fragments may reference other fragments, which is useful for composing
+surnames, titles and similar reusable pieces.
+
+```go
+gen, _ := fn.Compile(
+    "[hero:$title]$surname",
+    fn.Labels("hero"),
+    fn.Fragments(map[string]string{
+        "title":   "{4:(Ser )|1:(the Bold )}",
+        "surname": "{9:(Smith|Jones)|1:(Wyrmbane)}",
+    }),
+)
+```
+
+Fragments that refer to each other in a cycle are rejected with
+`ErrRecursiveCycle`. Empty or whitespace-only fragments expand to the empty
+string.
+
+## escaping
+
+A backslash makes the next character literal, which is how to emit one of the
+syntax characters themselves: `\{`, `\}`, `\[`, `\]`, `\$`, `\\`, `\|`, `\<`,
+`\>`, `\(`, `\)`, `\!`, `\~` and `\:`. Any other escape is reported as
+`ErrBadEscape`. A `$` without a name (for example `x$` or `x$1y`) is emitted
+literally, so such patterns keep working; use `\$` to be explicit.
+
+## limits and compatibility
+
+Compilation is bounded: nesting deeper than 64 levels (`MaxNesting`), fragment
+chains longer than 32 (`MaxFragmentDepth`) and more than 4096 total fragment
+expansions (`MaxExpansions`) fail with `ErrTooDeep` instead of exhausting
+memory. All syntax errors carry a byte offset, returned by `ErrorPosition(err)`,
+and wrap a sentinel error (`ErrBadWeight`, `ErrMissingLabel`, `ErrBadLabel`,
+`ErrUnknownLabel`, `ErrBadEscape`, `ErrUnknownFragment`, `ErrRecursiveCycle`,
+`ErrTooDeep`), so callers can use `errors.Is`.
+
+If you compile patterns that may contain `{`, `[`, `$` or `\` as plain text - for
+example patterns stored before the extension existed - pass `Legacy(true)` to
+disable the new constructs and reproduce the original behavior exactly.
